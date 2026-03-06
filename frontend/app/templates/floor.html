@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Floor {{ floor_num }} — COE892 Parking{% endblock %}
+
+{% block content %}
+<div class="floor-page">
+    <!-- Navigation -->
+    <nav class="floor-nav">
+        <a href="/" class="nav-back">← Home</a>
+        <h1>COE892 Parking System</h1>
+        <div class="floor-tabs">
+            <a href="/floor/1" class="floor-tab {% if floor_num == 1 %}active{% endif %}">Floor 1</a>
+            <a href="/floor/2" class="floor-tab {% if floor_num == 2 %}active{% endif %}">Floor 2</a>
+            <a href="/floor/3" class="floor-tab {% if floor_num == 3 %}active{% endif %}">Floor 3</a>
+        </div>
+    </nav>
+
+    <!-- Legend -->
+    <div class="legend">
+        <span class="legend-item"><span class="legend-dot available"></span> Available</span>
+        <span class="legend-item"><span class="legend-dot occupied"></span> Occupied</span>
+        <span class="legend-item"><span class="legend-dot reserved"></span> Reserved</span>
+    </div>
+
+    <!-- Garage Floor Map -->
+    <div class="garage">
+        <div class="driving-lane lane-top">
+            <span class="lane-arrow">→</span>
+            <span class="lane-label">DRIVING LANE</span>
+            <span class="lane-arrow">→</span>
+        </div>
+
+        <div class="parking-rows">
+            <!-- Top row: spots 1-10 (angled, facing down) -->
+            <div class="parking-row row-top" id="row-top"></div>
+
+            <div class="driving-lane lane-middle">
+                <span class="lane-arrow">←</span>
+                <span class="lane-label">DRIVING LANE</span>
+                <span class="lane-arrow">←</span>
+            </div>
+
+            <!-- Bottom row: spots 11-20 (angled, facing up) -->
+            <div class="parking-row row-bottom" id="row-bottom"></div>
+        </div>
+
+        <div class="driving-lane lane-bottom">
+            <span class="lane-arrow">→</span>
+            <span class="lane-label">DRIVING LANE</span>
+            <span class="lane-arrow">→</span>
+        </div>
+    </div>
+
+    <!-- Floor Summary -->
+    <div class="floor-summary">
+        <span id="floor-available">—</span> of <span id="floor-total">20</span> spots available on Floor {{ floor_num }}
+    </div>
+</div>
+
+<!-- Booking Modal -->
+<div class="modal-overlay" id="modal" style="display:none;">
+    <div class="modal">
+        <button class="modal-close" id="modal-close">&times;</button>
+        <h2 id="modal-title">Spot —</h2>
+        <div class="modal-status" id="modal-status-section">
+            <span class="status-badge" id="modal-badge">Available</span>
+            <span class="modal-rate" id="modal-rate"></span>
+        </div>
+        <form id="booking-form">
+            <input type="hidden" id="book-spot-id">
+            <div class="form-group">
+                <label for="book-driver">Driver ID</label>
+                <input type="text" id="book-driver" placeholder="e.g. driver_42" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="book-start">Start Time</label>
+                    <input type="datetime-local" id="book-start" required>
+                </div>
+                <div class="form-group">
+                    <label for="book-end">End Time</label>
+                    <input type="datetime-local" id="book-end" required>
+                </div>
+            </div>
+            <button type="submit" class="btn-confirm" id="btn-confirm">Reserve Spot</button>
+        </form>
+        <div class="modal-message" id="modal-msg" style="display:none;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FLOOR = {{ floor_num }};
+</script>
+<script src="/static/app.js"></script>
+{% endblock %}

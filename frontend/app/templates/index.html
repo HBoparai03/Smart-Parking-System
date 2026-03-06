@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}COE892 Parking System{% endblock %}
+
+{% block content %}
+<div class="landing">
+    <div class="landing-card">
+        <div class="landing-icon">🅿️</div>
+        <h1>COE892 Parking System</h1>
+        <p class="landing-subtitle">Smart Parking — Real-time availability across 3 floors</p>
+        <a href="/floor/1" class="btn-book">Book Parking</a>
+        <div class="landing-stats" id="stats">
+            <div class="stat">
+                <span class="stat-num" id="stat-total">—</span>
+                <span class="stat-label">Total Spots</span>
+            </div>
+            <div class="stat">
+                <span class="stat-num" id="stat-available">—</span>
+                <span class="stat-label">Available</span>
+            </div>
+            <div class="stat">
+                <span class="stat-num" id="stat-occupied">—</span>
+                <span class="stat-label">Occupied</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStats() {
+    try {
+        const [spotsRes, availRes] = await Promise.all([
+            fetch('/api/spots'),
+            fetch('/api/availability')
+        ]);
+        const spots = await spotsRes.json();
+        const avail = await availRes.json();
+        const occupied = avail.filter(a => a.is_occupied).length;
+        document.getElementById('stat-total').textContent = spots.length;
+        document.getElementById('stat-available').textContent = spots.length - occupied;
+        document.getElementById('stat-occupied').textContent = occupied;
+    } catch (e) {
+        console.error('Failed to load stats', e);
+    }
+}
+loadStats();
+</script>
+{% endblock %}
