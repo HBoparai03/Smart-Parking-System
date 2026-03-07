@@ -73,7 +73,35 @@ async def update_reservation(
     reservation = await db.get(Reservation, reservation_id)
     if not reservation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reservation not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    updates = payload.model_dump(exclude_unset=True)
+    new_start = updates.get("start_time", reservation.start_time)
+    new_end = updates.get("end_time", reservation.end_time)
+    if new_end <= new_start:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="end_time must be after start_time")
+
+    if ("start_time" in updates or "end_time" in updates) and reservation.status in (
+        ReservationStatus.pending,
+        ReservationStatus.active,
+    ):
+        conflict = await db.execute(
+            select(Reservation).where(
+                and_(
+                    Reservation.id != reservation.id,
+                    Reservation.spot_id == reservation.spot_id,
+                    Reservation.status.in_([ReservationStatus.pending, ReservationStatus.active]),
+                    Reservation.start_time < new_end,
+                    Reservation.end_time > new_start,
+                )
+            )
+        )
+        if conflict.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spot is already reserved for the requested time window",
+            )
+
+    for field, value in updates.items():
         setattr(reservation, field, value)
     await db.flush()
     await db.refresh(reservation)

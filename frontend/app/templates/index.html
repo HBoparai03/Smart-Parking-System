@@ -19,6 +19,14 @@
                 <span class="stat-label">Available</span>
             </div>
             <div class="stat">
+                <span class="stat-num" id="stat-reserved">—</span>
+                <span class="stat-label">Reserved</span>
+            </div>
+            <div class="stat">
+                <span class="stat-num" id="stat-upcoming">—</span>
+                <span class="stat-label">Upcoming</span>
+            </div>
+            <div class="stat">
                 <span class="stat-num" id="stat-occupied">—</span>
                 <span class="stat-label">Occupied</span>
             </div>
@@ -31,15 +39,49 @@
 <script>
 async function loadStats() {
     try {
-        const [spotsRes, availRes] = await Promise.all([
+        const [spotsRes, availRes, pendingRes, activeRes] = await Promise.all([
             fetch('/api/spots'),
-            fetch('/api/availability')
+            fetch('/api/availability'),
+            fetch('/api/reservations?status=pending'),
+            fetch('/api/reservations?status=active'),
         ]);
+        if (!spotsRes.ok || !availRes.ok || !pendingRes.ok || !activeRes.ok) {
+            throw new Error('Stats API request failed');
+        }
         const spots = await spotsRes.json();
         const avail = await availRes.json();
-        const occupied = avail.filter(a => a.is_occupied).length;
+        const pendingReservations = await pendingRes.json();
+        const activeReservations = await activeRes.json();
+
+        const now = new Date();
+        const reservedNow = new Set();
+        const upcoming = new Set();
+        [...pendingReservations, ...activeReservations].forEach(r => {
+            const start = new Date(r.start_time);
+            const end = new Date(r.end_time);
+            if (start <= now && now <= end) {
+                reservedNow.add(r.spot_id);
+            } else if (start > now) {
+                upcoming.add(r.spot_id);
+            }
+        });
+
+        const occupiedSet = new Set(avail.filter(a => a.is_occupied).map(a => a.spot_id));
+        let occupied = 0;
+        let reserved = 0;
+        spots.forEach(s => {
+            if (occupiedSet.has(s.id)) {
+                occupied += 1;
+            } else if (reservedNow.has(s.id)) {
+                reserved += 1;
+            }
+        });
+
+        const available = Math.max(spots.length - occupied - reserved, 0);
         document.getElementById('stat-total').textContent = spots.length;
-        document.getElementById('stat-available').textContent = spots.length - occupied;
+        document.getElementById('stat-available').textContent = available;
+        document.getElementById('stat-reserved').textContent = reserved;
+        document.getElementById('stat-upcoming').textContent = upcoming.size;
         document.getElementById('stat-occupied').textContent = occupied;
     } catch (e) {
         console.error('Failed to load stats', e);

@@ -1,7 +1,10 @@
 // ── State ──
 let spots = [];
 let availMap = {};      // spot_id -> availability record
-let reservedSet = {};   // spot_id -> true if has active/pending reservation now
+let reservedNowSet = {};     // spot_id -> true if reserved now
+let upcomingCountMap = {};   // spot_id -> count of future reservations
+let nextUpcomingMap = {};    // spot_id -> earliest future start time
+let reservationsBySpot = {}; // spot_id -> reservations
 
 // ── DOM refs ──
 const rowTop = document.getElementById('row-top');
@@ -11,6 +14,7 @@ const modalClose = document.getElementById('modal-close');
 const modalTitle = document.getElementById('modal-title');
 const modalBadge = document.getElementById('modal-badge');
 const modalRate = document.getElementById('modal-rate');
+const modalUpcoming = document.getElementById('modal-upcoming');
 const bookForm = document.getElementById('booking-form');
 const bookSpotId = document.getElementById('book-spot-id');
 const bookDriver = document.getElementById('book-driver');
@@ -30,6 +34,9 @@ async function loadFloor() {
             fetch('/api/reservations?status=pending'),
             fetch('/api/reservations?status=active'),
         ]);
+        if (!spotsRes.ok || !availRes.ok || !pendingRes.ok || !activeRes.ok) {
+            throw new Error('API request failed');
+        }
         spots = await spotsRes.json();
         const allAvail = await availRes.json();
         const pendingReservations = await pendingRes.json();
@@ -38,18 +45,30 @@ async function loadFloor() {
         availMap = {};
         allAvail.forEach(a => { availMap[a.spot_id] = a; });
 
-        // Build set of spot IDs that have a current pending/active reservation
-        reservedSet = {};
+        reservedNowSet = {};
+        upcomingCountMap = {};
+        nextUpcomingMap = {};
+        reservationsBySpot = {};
         const now = new Date();
+
         [...pendingReservations, ...activeReservations].forEach(r => {
+            const spotId = r.spot_id;
             const start = new Date(r.start_time);
             const end = new Date(r.end_time);
-            if (start <= now && now <= end) {
-                reservedSet[r.spot_id] = true;
+
+            if (!reservationsBySpot[spotId]) {
+                reservationsBySpot[spotId] = [];
             }
-            // Also show as reserved if reservation is in the future (upcoming)
+            reservationsBySpot[spotId].push({ ...r, start, end });
+
+            if (start <= now && now <= end) {
+                reservedNowSet[spotId] = true;
+            }
             if (start > now) {
-                reservedSet[r.spot_id] = true;
+                upcomingCountMap[spotId] = (upcomingCountMap[spotId] || 0) + 1;
+                if (!nextUpcomingMap[spotId] || start < nextUpcomingMap[spotId]) {
+                    nextUpcomingMap[spotId] = start;
+                }
             }
         });
 
@@ -70,32 +89,33 @@ function renderSpots() {
     spots.forEach((spot, idx) => {
         const avail = availMap[spot.id];
         const isOccupied = avail ? avail.is_occupied : false;
-        const isReserved = !!reservedSet[spot.id];
+        const isReservedNow = !!reservedNowSet[spot.id];
+        const upcomingCount = upcomingCountMap[spot.id] || 0;
+        const hasUpcoming = upcomingCount > 0;
 
         let status, icon;
         if (isOccupied) {
             status = 'occupied';
             icon = '🚗';
-        } else if (isReserved) {
+        } else if (isReservedNow) {
             status = 'reserved';
             icon = '📋';
         } else {
             status = 'available';
-            icon = '🟢';
+            icon = hasUpcoming ? '📅' : '🟢';
         }
 
         const el = document.createElement('div');
-        el.className = `spot ${status}`;
+        el.className = `spot ${status}${hasUpcoming ? ' upcoming' : ''}`;
         el.dataset.spotId = spot.id;
         el.dataset.spotName = spot.name;
         el.innerHTML = `
             <span class="spot-icon">${icon}</span>
             <span class="spot-name">${spot.name}</span>
+            ${hasUpcoming ? `<span class="spot-upcoming">${upcomingCount}</span>` : ''}
         `;
 
-        if (status === 'available') {
-            el.addEventListener('click', () => openModal(spot));
-        }
+        el.addEventListener('click', () => openModal(spot, status));
 
         if (idx < 10) {
             rowTop.appendChild(el);
@@ -110,7 +130,7 @@ function updateSummary() {
     const available = spots.filter(s => {
         const a = availMap[s.id];
         const isOccupied = a ? a.is_occupied : false;
-        const isReserved = !!reservedSet[s.id];
+        const isReserved = !!reservedNowSet[s.id];
         return !isOccupied && !isReserved;
     }).length;
     floorTotal.textContent = spots.length;
@@ -118,11 +138,29 @@ function updateSummary() {
 }
 
 // ── Modal ──
-async function openModal(spot) {
+async function openModal(spot, status) {
     bookSpotId.value = spot.id;
     modalTitle.textContent = `Spot ${spot.name}`;
-    modalBadge.textContent = 'Available';
-    modalBadge.className = 'status-badge available';
+    if (status === 'occupied') {
+        modalBadge.textContent = 'Occupied';
+        modalBadge.className = 'status-badge occupied';
+    } else if (status === 'reserved') {
+        modalBadge.textContent = 'Reserved';
+        modalBadge.className = 'status-badge reserved';
+    } else {
+        modalBadge.textContent = 'Available';
+        modalBadge.className = 'status-badge available';
+    }
+    const upcomingCount = upcomingCountMap[spot.id] || 0;
+    const nextUpcoming = nextUpcomingMap[spot.id];
+    if (upcomingCount > 0) {
+        const nextText = nextUpcoming ? ` (next: ${formatLocalDate(nextUpcoming)})` : '';
+        modalUpcoming.textContent = `${upcomingCount} upcoming reservation${upcomingCount > 1 ? 's' : ''}${nextText}`;
+        modalUpcoming.style.display = 'block';
+    } else {
+        modalUpcoming.style.display = 'none';
+        modalUpcoming.textContent = '';
+    }
     modalMsg.style.display = 'none';
     bookForm.style.display = 'block';
     btnConfirm.disabled = false;
@@ -138,6 +176,9 @@ async function openModal(spot) {
     // Load pricing
     try {
         const r = await fetch(`/api/pricing/${spot.id}`);
+        if (!r.ok) {
+            throw new Error('Pricing unavailable');
+        }
         const pricing = await r.json();
         modalRate.textContent = `$${pricing.current_rate.toFixed(2)}/hr`;
     } catch {
@@ -198,6 +239,15 @@ function showMsg(type, text) {
     modalMsg.className = `modal-message ${type}`;
     modalMsg.textContent = text;
     modalMsg.style.display = 'block';
+}
+
+function formatLocalDate(date) {
+    return new Date(date).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
 }
 
 // ── Utility: format Date to datetime-local value ──

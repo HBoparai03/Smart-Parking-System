@@ -22,9 +22,16 @@ class ReservationCreate(ReservationBase):
 
 
 class ReservationUpdate(BaseModel):
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
     status: Optional[ReservationStatus] = None
     price_paid: Optional[float] = Field(None, ge=0)
-    end_time: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def end_after_start_if_both_set(self):
+        if self.start_time is not None and self.end_time is not None and self.end_time <= self.start_time:
+            raise ValueError("end_time must be after start_time")
+        return self
 
 
 class ReservationResponse(ReservationBase):
