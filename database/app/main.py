@@ -1,17 +1,20 @@
 from contextlib import asynccontextmanager
+import os
 from fastapi import FastAPI
 from app.database import engine, Base
 from app.routers import parking_spots, availability, reservations, pricing
 
-# Import all models so that Base.metadata picks them up before create_all
+# Import all models so Base.metadata is complete
 import app.models  # noqa: F401
+
+AUTO_CREATE_TABLES = os.getenv("AUTO_CREATE_TABLES", "false").strip().lower() == "true"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all tables on startup if they don't exist
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if AUTO_CREATE_TABLES:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     yield
     await engine.dispose()
 

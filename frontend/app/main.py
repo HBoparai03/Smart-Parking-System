@@ -1,8 +1,8 @@
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import httpx
 
 app = FastAPI(title="COE892 Smart Parking — Frontend")
@@ -12,6 +12,20 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 DB_SERVICE = os.getenv("DB_SERVICE_URL", "http://localhost:8001")
+
+
+async def _forward(method: str, path: str, params=None, json=None):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            r = await client.request(method, f"{DB_SERVICE}{path}", params=params, json=json)
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Database service is unavailable")
+
+    try:
+        payload = r.json()
+    except ValueError:
+        payload = {"detail": r.text}
+    return JSONResponse(status_code=r.status_code, content=payload)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -33,43 +47,33 @@ async def floor_page(request: Request, floor_num: int):
 
 @app.get("/api/spots")
 async def api_spots(floor: int = None):
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        params = {}
-        if floor:
-            params["floor"] = floor
-        r = await client.get(f"{DB_SERVICE}/spots/", params=params)
-        return r.json()
+    params = {}
+    if floor:
+        params["floor"] = floor
+    return await _forward("GET", "/spots/", params=params)
 
 
 @app.get("/api/availability")
 async def api_availability():
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(f"{DB_SERVICE}/availability/")
-        return r.json()
+    return await _forward("GET", "/availability/")
 
 
 @app.get("/api/pricing/{spot_id}")
 async def api_pricing(spot_id: int):
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(f"{DB_SERVICE}/pricing/{spot_id}")
-        return r.json()
+    return await _forward("GET", f"/pricing/{spot_id}")
 
 
 @app.get("/api/reservations")
 async def api_reservations(spot_id: int = None, status: str = None):
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        params = {}
-        if spot_id:
-            params["spot_id"] = spot_id
-        if status:
-            params["status"] = status
-        r = await client.get(f"{DB_SERVICE}/reservations/", params=params)
-        return r.json()
+    params = {}
+    if spot_id:
+        params["spot_id"] = spot_id
+    if status:
+        params["status"] = status
+    return await _forward("GET", "/reservations/", params=params)
 
 
 @app.post("/api/reservations")
 async def api_create_reservation(request: Request):
     body = await request.json()
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.post(f"{DB_SERVICE}/reservations/", json=body)
-        return r.json()
+    return await _forward("POST", "/reservations/", json=body)
