@@ -76,3 +76,10 @@ cd database
 python sensor_service.py --random-rate 0.03
 ```
 
+Optional 30% reserved scenario seed:
+
+```cmd
+cd database
+python seed_reserved_30.py
+```
+

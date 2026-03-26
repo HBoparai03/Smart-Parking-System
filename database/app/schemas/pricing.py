@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -31,3 +31,22 @@ class PricingRuleResponse(PricingRuleBase):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class PricingQuoteRequest(BaseModel):
+    spot_id: int
+    start_time: datetime
+    end_time: datetime
+
+
+class PricingQuoteResponse(BaseModel):
+    spot_id: int
+    start_time: datetime
+    end_time: datetime
+    duration_hours: float
+    estimated_total: float
+    estimated_hourly_rate: float
+    peak_time_applied: bool
+    max_demand_ratio: float
+    demand_multiplier_peak: float
+    reasons: List[str]

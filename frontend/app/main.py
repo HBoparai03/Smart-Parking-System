@@ -64,12 +64,14 @@ async def api_pricing(spot_id: int):
 
 
 @app.get("/api/reservations")
-async def api_reservations(spot_id: int = None, status: str = None):
+async def api_reservations(spot_id: int = None, status: str = None, driver_id: str = None):
     params = {}
     if spot_id:
         params["spot_id"] = spot_id
     if status:
         params["status"] = status
+    if driver_id:
+        params["driver_id"] = driver_id
     return await _forward("GET", "/reservations/", params=params)
 
 
@@ -77,3 +79,9 @@ async def api_reservations(spot_id: int = None, status: str = None):
 async def api_create_reservation(request: Request):
     body = await request.json()
     return await _forward("POST", "/reservations/", json=body)
+
+
+@app.post("/api/pricing/quote")
+async def api_pricing_quote(request: Request):
+    body = await request.json()
+    return await _forward("POST", "/pricing/quote", json=body)

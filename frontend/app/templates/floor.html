@@ -67,6 +67,7 @@
             <span class="status-badge" id="modal-badge">Available</span>
             <span class="modal-rate" id="modal-rate"></span>
         </div>
+        <div class="pricing-explainer" id="pricing-explainer" style="display:none;"></div>
         <div class="modal-upcoming" id="modal-upcoming" style="display:none;"></div>
         <form id="booking-form">
             <input type="hidden" id="book-spot-id">
@@ -74,19 +75,22 @@
                 <label for="book-driver">Driver ID</label>
                 <input type="text" id="book-driver" placeholder="e.g. driver_42" required>
             </div>
+            <div class="user-upcoming" id="user-upcoming" style="display:none;"></div>
             <div class="form-row">
                 <div class="form-group">
-                    <label for="book-start">Start Time</label>
-                    <input type="datetime-local" id="book-start" required>
+                    <label for="book-start">Start Time Slot</label>
+                    <select id="book-start" required></select>
                 </div>
                 <div class="form-group">
-                    <label for="book-end">End Time</label>
-                    <input type="datetime-local" id="book-end" required>
+                    <label for="book-end">End Time Slot</label>
+                    <select id="book-end" required></select>
                 </div>
             </div>
+            <div class="slot-constraints">Minimum booking: 30 minutes. Maximum booking: 12 hours.</div>
             <button type="submit" class="btn-confirm" id="btn-confirm">Reserve Spot</button>
         </form>
         <div class="modal-message" id="modal-msg" style="display:none;"></div>
+        <div class="confirmation-panel" id="confirmation-panel" style="display:none;"></div>
     </div>
 </div>
 {% endblock %}

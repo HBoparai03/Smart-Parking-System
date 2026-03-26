@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,9 +6,51 @@ from sqlalchemy import select, and_
 from app.database import get_db
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.parking_spot import ParkingSpot
-from app.schemas.reservation import ReservationCreate, ReservationUpdate, ReservationResponse
+from app.schemas.reservation import (
+    MAX_BOOKING_HOURS,
+    MIN_BOOKING_MINUTES,
+    ReservationCreate,
+    ReservationResponse,
+    ReservationUpdate,
+)
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
+
+
+def _to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Datetime values must include timezone information",
+        )
+    return value.astimezone(timezone.utc)
+
+
+def _validate_time_window(start_time: datetime, end_time: datetime) -> None:
+    start_utc = _to_utc(start_time)
+    end_utc = _to_utc(end_time)
+
+    if end_utc <= start_utc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="end_time must be after start_time")
+
+    duration = end_utc - start_utc
+    if duration < timedelta(minutes=MIN_BOOKING_MINUTES):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Reservation duration must be at least {MIN_BOOKING_MINUTES} minutes",
+        )
+    if duration > timedelta(hours=MAX_BOOKING_HOURS):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Reservation duration must be at most {MAX_BOOKING_HOURS} hours",
+        )
+
+    current_hour_floor = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    if start_utc < current_hour_floor:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_time cannot be before the current hour",
+        )
 
 
 @router.get("/", response_model=List[ReservationResponse])
@@ -38,6 +81,8 @@ async def get_reservation(reservation_id: int, db: AsyncSession = Depends(get_db
 
 @router.post("/", response_model=ReservationResponse, status_code=status.HTTP_201_CREATED)
 async def create_reservation(payload: ReservationCreate, db: AsyncSession = Depends(get_db)):
+    _validate_time_window(payload.start_time, payload.end_time)
+
     spot = await db.get(ParkingSpot, payload.spot_id)
     if not spot or not spot.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active parking spot not found")
@@ -77,8 +122,8 @@ async def update_reservation(
     updates = payload.model_dump(exclude_unset=True)
     new_start = updates.get("start_time", reservation.start_time)
     new_end = updates.get("end_time", reservation.end_time)
-    if new_end <= new_start:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="end_time must be after start_time")
+    if "start_time" in updates or "end_time" in updates:
+        _validate_time_window(new_start, new_end)
 
     if ("start_time" in updates or "end_time" in updates) and reservation.status in (
         ReservationStatus.pending,
