@@ -335,12 +335,14 @@ body {
 .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 100;
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 .modal {
@@ -348,10 +350,11 @@ body {
     border: 1px solid var(--border);
     border-radius: 16px;
     padding: 2rem;
-    width: 480px;
-    max-width: 95vw;
+    width: 560px;
+    max-width: 100%;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
+    box-sizing: border-box;
 }
 
 .modal-close {
@@ -365,11 +368,15 @@ body {
     cursor: pointer;
     line-height: 1;
 }
-.modal-close:hover { color: var(--text); }
+
+    .modal-close:hover {
+        color: var(--text);
+    }
 
 .modal h2 {
     font-size: 1.25rem;
-    margin-bottom: 0.75rem;
+    margin: 0 0 0.75rem 0;
+    padding-right: 2rem;
 }
 
 .modal-status {
@@ -377,6 +384,7 @@ body {
     align-items: center;
     gap: 1rem;
     margin-bottom: 1.5rem;
+    flex-wrap: wrap;
 }
 
 .status-badge {
@@ -385,9 +393,21 @@ body {
     font-size: 0.8rem;
     font-weight: 600;
 }
-.status-badge.available { background: rgba(34,197,94,0.15); color: var(--green); }
-.status-badge.occupied  { background: rgba(239,68,68,0.15); color: var(--red); }
-.status-badge.reserved  { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+    .status-badge.available {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--green);
+    }
+
+    .status-badge.occupied {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--red);
+    }
+
+    .status-badge.reserved {
+        background: rgba(234, 179, 8, 0.15);
+        color: var(--yellow);
+    }
 
 .modal-rate {
     font-size: 0.9rem;
@@ -398,36 +418,41 @@ body {
     margin-bottom: 1rem;
     color: #7dd3fc;
     font-size: 0.85rem;
+    line-height: 1.4;
 }
 
 .form-group {
     margin-bottom: 1rem;
-}
-
-.form-group label {
-    display: block;
-    font-size: 0.8rem;
-    color: var(--muted);
-    margin-bottom: 0.35rem;
-    font-weight: 500;
-}
-
-.form-group input {
-    width: 100%;
-    padding: 0.6rem 0.75rem;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text);
-    font-size: 0.85rem;
-    font-family: inherit;
     min-width: 0;
 }
-.form-group input:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-}
+
+    .form-group label {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+        font-weight: 500;
+    }
+
+    .form-group input {
+        display: block;
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 0.85rem;
+        font-family: inherit;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
 
 .form-row {
     display: grid;
@@ -436,10 +461,10 @@ body {
     min-width: 0;
 }
 
-.form-row .form-group {
-    min-width: 0;
-    overflow: hidden;
-}
+    .form-row .form-group {
+        min-width: 0;
+        margin-bottom: 1rem;
+    }
 
 .btn-confirm {
     width: 100%;
@@ -455,11 +480,15 @@ body {
     font-family: inherit;
     margin-top: 0.5rem;
 }
-.btn-confirm:hover { background: #2563eb; }
-.btn-confirm:disabled {
-    background: var(--border);
-    cursor: not-allowed;
-}
+
+    .btn-confirm:hover {
+        background: #2563eb;
+    }
+
+    .btn-confirm:disabled {
+        background: var(--border);
+        cursor: not-allowed;
+    }
 
 .modal-message {
     margin-top: 1rem;
@@ -467,14 +496,32 @@ body {
     border-radius: 8px;
     font-size: 0.9rem;
     text-align: center;
+    line-height: 1.4;
 }
-.modal-message.success {
-    background: rgba(34,197,94,0.12);
-    color: var(--green);
-}
-.modal-message.error {
-    background: rgba(239,68,68,0.12);
-    color: var(--red);
+
+    .modal-message.success {
+        background: rgba(34, 197, 94, 0.12);
+        color: var(--green);
+    }
+
+    .modal-message.error {
+        background: rgba(239, 68, 68, 0.12);
+        color: var(--red);
+    }
+
+@media (max-width: 700px) {
+    .modal {
+        width: 100%;
+        padding: 1.25rem;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .modal h2 {
+        padding-right: 1.75rem;
+    }
 }
 
 /* ── Responsive ── */
