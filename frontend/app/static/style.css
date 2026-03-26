@@ -421,6 +421,40 @@ body {
     line-height: 1.4;
 }
 
+.pricing-explainer {
+    margin-bottom: 1rem;
+    border: 1px solid rgba(125, 211, 252, 0.25);
+    background: rgba(56, 189, 248, 0.08);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    color: #bae6fd;
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
+.user-upcoming {
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+    background: rgba(15, 17, 23, 0.6);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.user-upcoming strong {
+    color: var(--text);
+}
+
+.user-upcoming ul {
+    margin: 0.5rem 0 0 1rem;
+    padding: 0;
+}
+
+.user-upcoming li {
+    margin: 0.3rem 0;
+}
+
 .form-group {
     margin-bottom: 1rem;
     min-width: 0;
@@ -434,7 +468,8 @@ body {
         font-weight: 500;
     }
 
-    .form-group input {
+    .form-group input,
+    .form-group select {
         display: block;
         width: 100%;
         padding: 0.6rem 0.75rem;
@@ -448,11 +483,19 @@ body {
         box-sizing: border-box;
     }
 
-        .form-group input:focus {
+        .form-group input:focus,
+        .form-group select:focus {
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
         }
+
+    .slot-constraints {
+        margin-top: -0.2rem;
+        margin-bottom: 0.8rem;
+        font-size: 0.78rem;
+        color: var(--muted);
+    }
 
 .form-row {
     display: grid;
@@ -508,6 +551,25 @@ body {
         background: rgba(239, 68, 68, 0.12);
         color: var(--red);
     }
+
+.confirmation-panel {
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    background: rgba(34, 197, 94, 0.1);
+    border-radius: 10px;
+    padding: 1rem;
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+.confirmation-panel h3 {
+    margin-bottom: 0.6rem;
+    font-size: 1.05rem;
+}
+
+.confirmation-note {
+    margin-top: 0.7rem;
+    color: #bbf7d0;
+}
 
 @media (max-width: 700px) {
     .modal {

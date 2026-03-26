@@ -1,8 +1,9 @@
 import argparse
+import math
 import os
 import random
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import httpx
@@ -10,6 +11,17 @@ import httpx
 DB_URL = os.getenv("DB_SERVICE_URL", "http://localhost:8001")
 DEFAULT_INTERVAL = float(os.getenv("SENSOR_INTERVAL_SEC", "5"))
 DEFAULT_RANDOM_RATE = float(os.getenv("RANDOM_TRAFFIC_RATE", "0.00"))
+RUSH_THRESHOLD = 0.1
+DEMAND_SIGMOID_STEEPNESS = 4.0
+DEMAND_MIDPOINT = 0.45
+MAX_DEMAND_EXTRA = 1.20
+RUSH_ON_MIN_MULTIPLIER = 1.08
+RUSH_OFF_MAX_MULTIPLIER = 1.04
+PROJECTION_LOOKAHEAD_HOURS = 2
+RATIO_SMOOTH_ALPHA = 0.4
+MIN_BILLABLE_HOURS = 0.5
+
+_smoothed_demand_ratio = 0.0
 
 
 def utc_now() -> datetime:
@@ -37,6 +49,52 @@ def patch_json(client: httpx.Client, path: str, payload: dict):
     return r.json()
 
 
+def _smooth_demand_multiplier(demand_ratio: float) -> float:
+    ratio = max(0.0, min(1.0, demand_ratio))
+
+    min_sig = 1.0 / (1.0 + math.exp(-DEMAND_SIGMOID_STEEPNESS * (0.0 - DEMAND_MIDPOINT)))
+    max_sig = 1.0 / (1.0 + math.exp(-DEMAND_SIGMOID_STEEPNESS * (1.0 - DEMAND_MIDPOINT)))
+    current_sig = 1.0 / (1.0 + math.exp(-DEMAND_SIGMOID_STEEPNESS * (ratio - DEMAND_MIDPOINT)))
+
+    normalized = (current_sig - min_sig) / (max_sig - min_sig) if max_sig > min_sig else 0.0
+    return 1.0 + (MAX_DEMAND_EXTRA * normalized)
+
+
+def _reservation_based_projection_ratio(
+    now: datetime,
+    total_spots: int,
+    reservations: List[dict],
+) -> float:
+    if total_spots <= 0:
+        return 0.0
+
+    ratios: List[float] = []
+    checkpoints = [
+        now,
+        now + timedelta(minutes=30),
+        now + timedelta(hours=1),
+    ]
+
+    for checkpoint in checkpoints:
+        overlap = {
+            item["spot_id"]
+            for item in reservations
+            if parse_ts(item["start_time"]) <= checkpoint < parse_ts(item["end_time"])
+        }
+
+        starts_soon = {
+            item["spot_id"]
+            for item in reservations
+            if checkpoint <= parse_ts(item["start_time"]) < (checkpoint + timedelta(hours=PROJECTION_LOOKAHEAD_HOURS))
+        }
+
+        overlap_ratio = len(overlap) / total_spots
+        starts_soon_ratio = len(starts_soon) / total_spots
+        ratios.append(min(1.0, (0.85 * overlap_ratio) + (0.15 * starts_soon_ratio)))
+
+    return sum(ratios) / len(ratios)
+
+
 def sync_reservations(client: httpx.Client) -> Tuple[Set[int], int]:
     reservations: List[dict] = get_json(client, "/reservations/")
     pricing_rules: List[dict] = get_json(client, "/pricing/")
@@ -57,7 +115,7 @@ def sync_reservations(client: httpx.Client) -> Tuple[Set[int], int]:
         spot_id = item["spot_id"]
 
         if now >= end_time:
-            hours = max((end_time - start_time).total_seconds() / 3600.0, 0.0)
+            hours = max((end_time - start_time).total_seconds() / 3600.0, MIN_BILLABLE_HOURS)
             rate = pricing_by_spot.get(spot_id, 0.0)
             price_paid = round(rate * hours, 2)
             patch_json(
@@ -108,30 +166,35 @@ def sync_availability(client: httpx.Client, active_spots: Set[int], random_rate:
 
     return changed
 
-def surge_pricing(client: httpx.Client, active_spots: Set[int]) -> int:#ben change -> price surging 
+def surge_pricing(client: httpx.Client, active_spots: Set[int]) -> int:  # price surging
     spots: List[dict] = get_json(client, "/spots/", params={"active_only": True})
-    availability: List[dict] = get_json(client, "/availability/")
+    pending_reservations: List[dict] = get_json(client, "/reservations/", params={"status": "pending"})
+    active_reservations: List[dict] = get_json(client, "/reservations/", params={"status": "active"})
     pricing_rules: List[dict] = get_json(client, "/pricing/")
 
     if not spots:
         return 0
 
+    global _smoothed_demand_ratio
+
     active_spot_ids = {spot["id"] for spot in spots}
-    avail_map = {item["spot_id"]: item for item in availability}
     pricing_map = {rule["spot_id"]: rule for rule in pricing_rules}
 
     total_spots = len(active_spot_ids)
-    occupied_spots = 0
+    projected_reservations = [
+        item for item in (pending_reservations + active_reservations) if item.get("spot_id") in active_spot_ids
+    ]
 
-    for spot_id in active_spot_ids:
-        avail = avail_map.get(spot_id)
-        if avail and bool(avail.get("is_occupied", False)):
-            occupied_spots += 1
+    projected_ratio = _reservation_based_projection_ratio(utc_now(), total_spots, projected_reservations)
+    _smoothed_demand_ratio = (RATIO_SMOOTH_ALPHA * projected_ratio) + ((1.0 - RATIO_SMOOTH_ALPHA) * _smoothed_demand_ratio)
 
-    occupancy_rate = occupied_spots / total_spots if total_spots else 0.0
+    rush_multiplier = round(_smooth_demand_multiplier(_smoothed_demand_ratio), 3)
 
-    # enable peak mode when 80%+ of spots are occupied
-    should_be_peak = occupancy_rate >= 0.80
+    currently_rush = any(bool(rule.get("is_rush_now", False)) for rule in pricing_rules)
+    if currently_rush:
+        should_be_rush = rush_multiplier >= RUSH_OFF_MAX_MULTIPLIER
+    else:
+        should_be_rush = rush_multiplier >= RUSH_ON_MIN_MULTIPLIER
 
     changed = 0
     for spot_id in active_spot_ids:
@@ -139,16 +202,25 @@ def surge_pricing(client: httpx.Client, active_spots: Set[int]) -> int:#ben chan
         if not rule:
             continue
 
-        current_peak = bool(rule.get("is_rush_now", False))
-        if current_peak == should_be_peak:
+        current_rush = bool(rule.get("is_rush_now", False))
+        current_multiplier = float(rule.get("rush_multiplier", 1.0))
+        if should_be_rush:
+            if current_rush == should_be_rush and abs(current_multiplier - rush_multiplier) < 1e-6:
+                continue
+        elif current_rush == should_be_rush:
             continue
 
-        patch_json(client, f"/pricing/{spot_id}", {"is_rush_now": should_be_peak})
+        payload = {"is_rush_now": should_be_rush}
+        if should_be_rush:
+            payload["rush_multiplier"] = rush_multiplier
+
+        patch_json(client, f"/pricing/{spot_id}", payload)
         changed += 1
 
     print(
-        f"[{utc_now().isoformat()}] pricing_sync occupancy_rate={occupancy_rate:.2f} "
-        f"rush={should_be_peak} changed={changed}"
+        f"[{utc_now().isoformat()}] pricing_sync projected_ratio={projected_ratio:.2f} "
+        f"smoothed_ratio={_smoothed_demand_ratio:.2f} rush={should_be_rush} "
+        f"rush_multiplier={rush_multiplier:.3f} changed={changed}"
     )
     return changed
 
