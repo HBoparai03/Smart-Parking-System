@@ -108,13 +108,86 @@ def sync_availability(client: httpx.Client, active_spots: Set[int], random_rate:
 
     return changed
 
+def surge_pricing(client: httpx.Client, active_spots: Set[int]) -> int:#ben change -> price surging 
+    spots: List[dict] = get_json(client, "/spots/", params={"active_only": True})
+    availability: List[dict] = get_json(client, "/availability/")
+    pricing_rules: List[dict] = get_json(client, "/pricing/")
+
+    if not spots:
+        return 0
+
+    active_spot_ids = {spot["id"] for spot in spots}
+    avail_map = {item["spot_id"]: item for item in availability}
+    pricing_map = {rule["spot_id"]: rule for rule in pricing_rules}
+
+    total_spots = len(active_spot_ids)
+    occupied_spots = 0
+
+    for spot_id in active_spot_ids:
+        avail = avail_map.get(spot_id)
+        if avail and bool(avail.get("is_occupied", False)):
+            occupied_spots += 1
+
+    occupancy_rate = occupied_spots / total_spots if total_spots else 0.0
+
+    # enable peak mode when 80%+ of spots are occupied
+    should_be_peak = occupancy_rate >= 0.80
+
+    changed = 0
+    for spot_id in active_spot_ids:
+        rule = pricing_map.get(spot_id)
+        if not rule:
+            continue
+
+        current_peak = bool(rule.get("is_rush_now", False))
+        if current_peak == should_be_peak:
+            continue
+
+        patch_json(client, f"/pricing/{spot_id}", {"is_rush_now": should_be_peak})
+        changed += 1
+
+    print(
+        f"[{utc_now().isoformat()}] pricing_sync occupancy_rate={occupancy_rate:.2f} "
+        f"rush={should_be_peak} changed={changed}"
+    )
+    return changed
+
+def sync_timed_pricing(client: httpx.Client) -> int: #timed price surge between 1pm and 8pm
+    pricing_rules: List[dict] = get_json(client, "/pricing/")
+    now = datetime.now()
+    current_hour = now.hour
+
+    # Peak hours: 1:00 PM up to but not including 8:00 PM
+    should_be_peak = 13 <= current_hour < 20
+
+    changed = 0
+    for rule in pricing_rules:
+        spot_id = rule["spot_id"]
+        current_peak = bool(rule.get("is_peak_now", False))
+
+        if current_peak == should_be_peak:
+            continue
+
+        patch_json(client, f"/pricing/{spot_id}", {"is_peak_now": should_be_peak})
+        changed += 1
+
+    print(
+        f"[{utc_now().isoformat()}] timed_pricing "
+        f"hour={current_hour} peak={should_be_peak} changed={changed}"
+    )
+    return changed
 
 def run_cycle(client: httpx.Client, random_rate: float) -> None:
     active_spots, reservation_changes = sync_reservations(client)
     availability_changes = sync_availability(client, active_spots, random_rate)
+
+    timed_changes = sync_timed_pricing(client)
+    rush_changes = surge_pricing(client, active_spots)
+
     print(
         f"[{utc_now().isoformat()}] reservations={reservation_changes} "
-        f"availability={availability_changes}"
+        f"availability={availability_changes} "
+        f"timed_peak={timed_changes} rush_surge={rush_changes}"
     )
 
 

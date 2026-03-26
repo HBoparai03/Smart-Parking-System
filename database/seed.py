@@ -18,7 +18,7 @@ FLOORS = [
 
 SPOTS_PER_FLOOR = 20
 
-PRICING_DEFAULTS = {"base_rate": 2.50, "peak_multiplier": 1.75, "is_peak_now": False}
+PRICING_DEFAULTS = {"base_rate": 2.50, "peak_multiplier": 1.75, "is_peak_now": False, "rush_multiplier": 1.5, "is_rush_now": False}
 
 
 def seed():
