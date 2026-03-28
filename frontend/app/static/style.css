@@ -50,8 +50,8 @@ body {
 
 .landing-subtitle {
     color: var(--muted);
-    font-size: 1.15rem;
-    margin-bottom: 2.5rem;
+    font-size: 1rem;
+    margin-bottom: 2.2rem;
 }
 
 .btn-book {
@@ -75,9 +75,10 @@ body {
 
 .landing-stats {
     display: flex;
-    gap: 3rem;
+    gap: 2.25rem;
     justify-content: center;
     margin-top: 3rem;
+    flex-wrap: wrap;
 }
 
 .stat {
@@ -162,7 +163,7 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: var(--muted);
 }
 
@@ -327,7 +328,7 @@ body {
     text-align: center;
     margin-top: 1.5rem;
     color: var(--muted);
-    font-size: 0.95rem;
+    font-size: 0.86rem;
 }
 .floor-summary span { color: var(--text); font-weight: 600; }
 
@@ -382,8 +383,8 @@ body {
 .modal-status {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
     flex-wrap: wrap;
 }
 
@@ -410,35 +411,44 @@ body {
     }
 
 .modal-rate {
-    font-size: 0.9rem;
+    font-size: 0.84rem;
     color: var(--muted);
 }
 
-.modal-upcoming {
-    margin-bottom: 1rem;
+.modal-pricing-mode {
+    font-size: 0.76rem;
     color: #7dd3fc;
-    font-size: 0.85rem;
+    border: 1px solid rgba(125, 211, 252, 0.2);
+    background: rgba(56, 189, 248, 0.08);
+    border-radius: 999px;
+    padding: 0.2rem 0.5rem;
+}
+
+.modal-upcoming {
+    margin-bottom: 0.8rem;
+    color: #7dd3fc;
+    font-size: 0.78rem;
     line-height: 1.4;
 }
 
 .pricing-explainer {
-    margin-bottom: 1rem;
+    margin-bottom: 0.8rem;
     border: 1px solid rgba(125, 211, 252, 0.25);
     background: rgba(56, 189, 248, 0.08);
     border-radius: 8px;
-    padding: 0.6rem 0.75rem;
+    padding: 0.45rem 0.65rem;
     color: #bae6fd;
-    font-size: 0.82rem;
+    font-size: 0.76rem;
     line-height: 1.4;
 }
 
 .user-upcoming {
-    margin-bottom: 1rem;
+    margin-bottom: 0.9rem;
     border: 1px solid var(--border);
     background: rgba(15, 17, 23, 0.6);
     border-radius: 8px;
-    padding: 0.6rem 0.75rem;
-    font-size: 0.82rem;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.78rem;
     color: var(--muted);
 }
 
@@ -452,7 +462,12 @@ body {
 }
 
 .user-upcoming li {
-    margin: 0.3rem 0;
+    margin: 0.25rem 0;
+}
+
+.user-upcoming-more {
+    margin-top: 0.35rem;
+    font-size: 0.74rem;
 }
 
 .form-group {
@@ -493,7 +508,7 @@ body {
     .slot-constraints {
         margin-top: -0.2rem;
         margin-bottom: 0.8rem;
-        font-size: 0.78rem;
+        font-size: 0.74rem;
         color: var(--muted);
     }
 
@@ -556,19 +571,14 @@ body {
     border: 1px solid rgba(34, 197, 94, 0.35);
     background: rgba(34, 197, 94, 0.1);
     border-radius: 10px;
-    padding: 1rem;
-    font-size: 0.88rem;
-    line-height: 1.5;
+    padding: 0.85rem;
+    font-size: 0.82rem;
+    line-height: 1.45;
 }
 
 .confirmation-panel h3 {
     margin-bottom: 0.6rem;
     font-size: 1.05rem;
-}
-
-.confirmation-note {
-    margin-top: 0.7rem;
-    color: #bbf7d0;
 }
 
 @media (max-width: 700px) {

@@ -37,3 +37,6 @@ Thumbs.db
 *.log
 *.tmp
 .cache/
+
+# Local notes and draft docs
+*.md

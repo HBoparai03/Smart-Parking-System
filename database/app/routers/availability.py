@@ -1,4 +1,5 @@
-from typing import List
+from datetime import datetime, timezone
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,7 +11,23 @@ from app.schemas.availability import AvailabilityCreate, AvailabilityUpdate, Ava
 router = APIRouter(prefix="/availability", tags=["Availability"])
 
 
-def _validate_occupancy(is_occupied: bool, occupied_count: int, capacity: int) -> None:
+def _to_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Datetime values must include timezone information",
+        )
+    return value.astimezone(timezone.utc)
+
+
+def _validate_occupancy(
+    is_occupied: bool,
+    occupied_count: int,
+    capacity: int,
+    occupied_until: Optional[datetime],
+) -> None:
     if occupied_count < 0 or occupied_count > capacity:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -25,6 +42,11 @@ def _validate_occupancy(is_occupied: bool, occupied_count: int, capacity: int) -
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="occupied_count must be greater than 0 when is_occupied is true",
+        )
+    if not is_occupied and occupied_until is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="occupied_until must be null when is_occupied is false",
         )
 
 
@@ -50,7 +72,12 @@ async def create_availability(payload: AvailabilityCreate, db: AsyncSession = De
     spot = await db.get(ParkingSpot, payload.spot_id)
     if not spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parking spot not found")
-    _validate_occupancy(payload.is_occupied, payload.occupied_count, spot.total_capacity)
+    _validate_occupancy(
+        payload.is_occupied,
+        payload.occupied_count,
+        spot.total_capacity,
+        _to_utc(payload.occupied_until),
+    )
 
     existing = await db.execute(
         select(Availability).where(Availability.spot_id == payload.spot_id)
@@ -82,7 +109,10 @@ async def update_availability(spot_id: int, payload: AvailabilityUpdate, db: Asy
     updates = payload.model_dump(exclude_unset=True)
     new_is_occupied = updates.get("is_occupied", avail.is_occupied)
     new_occupied_count = updates.get("occupied_count", avail.occupied_count)
-    _validate_occupancy(new_is_occupied, new_occupied_count, spot.total_capacity)
+    new_occupied_until = _to_utc(updates.get("occupied_until", avail.occupied_until))
+    _validate_occupancy(new_is_occupied, new_occupied_count, spot.total_capacity, new_occupied_until)
+    if "occupied_until" in updates:
+        updates["occupied_until"] = new_occupied_until
 
     for field, value in updates.items():
         setattr(avail, field, value)

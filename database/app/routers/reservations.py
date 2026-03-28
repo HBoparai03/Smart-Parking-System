@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.database import get_db
+from app.models.availability import Availability
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.parking_spot import ParkingSpot
 from app.schemas.reservation import (
@@ -53,6 +54,40 @@ def _validate_time_window(start_time: datetime, end_time: datetime) -> None:
         )
 
 
+async def _validate_physical_occupancy(
+    db: AsyncSession,
+    spot_id: int,
+    start_time: datetime,
+) -> None:
+    result = await db.execute(select(Availability).where(Availability.spot_id == spot_id))
+    availability = result.scalar_one_or_none()
+    if not availability or not availability.is_occupied:
+        return
+
+    now = datetime.now(timezone.utc)
+    active_reservation = await db.execute(
+        select(Reservation).where(
+            and_(
+                Reservation.spot_id == spot_id,
+                Reservation.status == ReservationStatus.active,
+                Reservation.start_time <= now,
+                Reservation.end_time > now,
+            )
+        )
+    )
+    if active_reservation.scalar_one_or_none():
+        return
+
+    occupied_until = availability.occupied_until.astimezone(timezone.utc) if availability.occupied_until else None
+    blocked_until = occupied_until or (now + timedelta(minutes=MIN_BOOKING_MINUTES))
+
+    if _to_utc(start_time) < blocked_until:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Spot is currently occupied and unavailable for the requested start time",
+        )
+
+
 @router.get("/", response_model=List[ReservationResponse])
 async def list_reservations(
     spot_id: Optional[int] = Query(None),
@@ -86,6 +121,8 @@ async def create_reservation(payload: ReservationCreate, db: AsyncSession = Depe
     spot = await db.get(ParkingSpot, payload.spot_id)
     if not spot or not spot.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active parking spot not found")
+
+    await _validate_physical_occupancy(db, payload.spot_id, payload.start_time)
 
     # Conflict check: reject overlapping active/pending reservations for same spot
     conflict = await db.execute(
@@ -129,6 +166,8 @@ async def update_reservation(
         ReservationStatus.pending,
         ReservationStatus.active,
     ):
+        await _validate_physical_occupancy(db, reservation.spot_id, new_start)
+
         conflict = await db.execute(
             select(Reservation).where(
                 and_(
