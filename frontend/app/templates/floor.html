@@ -54,7 +54,7 @@
 
     <!-- Floor Summary -->
     <div class="floor-summary">
-        <span id="floor-available">—</span> of <span id="floor-total">20</span> spots available on Floor {{ floor_num }}
+        <span id="floor-available">—</span> / <span id="floor-total">20</span> open on Floor {{ floor_num }}
     </div>
 </div>
 
@@ -66,27 +66,28 @@
         <div class="modal-status" id="modal-status-section">
             <span class="status-badge" id="modal-badge">Available</span>
             <span class="modal-rate" id="modal-rate"></span>
+            <span class="modal-pricing-mode" id="modal-pricing-mode"></span>
         </div>
         <div class="pricing-explainer" id="pricing-explainer" style="display:none;"></div>
         <div class="modal-upcoming" id="modal-upcoming" style="display:none;"></div>
         <form id="booking-form">
             <input type="hidden" id="book-spot-id">
             <div class="form-group">
-                <label for="book-driver">Driver ID</label>
-                <input type="text" id="book-driver" placeholder="e.g. driver_42" required>
+                <label for="book-driver">Driver</label>
+                <input type="text" id="book-driver" placeholder="driver_42" required>
             </div>
             <div class="user-upcoming" id="user-upcoming" style="display:none;"></div>
             <div class="form-row">
                 <div class="form-group">
-                    <label for="book-start">Start Time Slot</label>
+                    <label for="book-start">Start</label>
                     <select id="book-start" required></select>
                 </div>
                 <div class="form-group">
-                    <label for="book-end">End Time Slot</label>
+                    <label for="book-end">End</label>
                     <select id="book-end" required></select>
                 </div>
             </div>
-            <div class="slot-constraints">Minimum booking: 30 minutes. Maximum booking: 12 hours.</div>
+            <div class="slot-constraints">30 min to 12 hr</div>
             <button type="submit" class="btn-confirm" id="btn-confirm">Reserve Spot</button>
         </form>
         <div class="modal-message" id="modal-msg" style="display:none;"></div>

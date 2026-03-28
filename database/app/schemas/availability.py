@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class AvailabilityBase(BaseModel):
     is_occupied: bool = False
     occupied_count: int = Field(default=0, ge=0)
+    occupied_until: Optional[datetime] = None
 
 
 class AvailabilityCreate(AvailabilityBase):
@@ -15,6 +16,7 @@ class AvailabilityCreate(AvailabilityBase):
 class AvailabilityUpdate(BaseModel):
     is_occupied: Optional[bool] = None
     occupied_count: Optional[int] = Field(None, ge=0)
+    occupied_until: Optional[datetime] = None
 
 
 class AvailabilityResponse(AvailabilityBase):

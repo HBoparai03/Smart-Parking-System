@@ -34,6 +34,7 @@ const modalClose = document.getElementById('modal-close');
 const modalTitle = document.getElementById('modal-title');
 const modalBadge = document.getElementById('modal-badge');
 const modalRate = document.getElementById('modal-rate');
+const modalPricingMode = document.getElementById('modal-pricing-mode');
 const modalUpcoming = document.getElementById('modal-upcoming');
 const pricingExplainer = document.getElementById('pricing-explainer');
 const userUpcoming = document.getElementById('user-upcoming');
@@ -52,7 +53,7 @@ const floorTotal = document.getElementById('floor-total');
 async function loadFloor() {
     try {
         const [spotsRes, allActiveSpotsRes, availRes, pendingRes, activeRes] = await Promise.all([
-            fetch(`/api/spots?floor=${FLOOR}`),
+            fetch(`/api/spots?floor=${FLOOR}&active_only=true`),
             fetch('/api/spots?active_only=true'),
             fetch('/api/availability'),
             fetch('/api/reservations?status=pending'),
@@ -164,6 +165,15 @@ function updateSummary() {
     floorAvailable.textContent = available;
 }
 
+function getOccupiedUntil(spotId) {
+    const avail = availMap[spotId];
+    if (!avail || !avail.is_occupied || !avail.occupied_until) {
+        return null;
+    }
+    const dt = new Date(avail.occupied_until);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 async function openModal(spot, status) {
     currentSpot = spot;
     latestQuote = null;
@@ -173,6 +183,7 @@ async function openModal(spot, status) {
     currentPricingRule = null;
     bookSpotId.value = spot.id;
     modalTitle.textContent = `Spot ${spot.name}`;
+    modalPricingMode.textContent = '';
 
     if (status === 'occupied') {
         modalBadge.textContent = 'Occupied';
@@ -188,8 +199,8 @@ async function openModal(spot, status) {
     const upcomingCount = upcomingCountMap[spot.id] || 0;
     const nextUpcoming = nextUpcomingMap[spot.id];
     if (upcomingCount > 0) {
-        const nextText = nextUpcoming ? ` (next: ${formatLocalDate(nextUpcoming)})` : '';
-        modalUpcoming.textContent = `${upcomingCount} upcoming reservation${upcomingCount > 1 ? 's' : ''}${nextText}`;
+        const nextText = nextUpcoming ? ` • Next ${formatLocalDate(nextUpcoming)}` : '';
+        modalUpcoming.textContent = `${upcomingCount} upcoming${nextText}`;
         modalUpcoming.style.display = 'block';
     } else {
         modalUpcoming.style.display = 'none';
@@ -210,8 +221,10 @@ async function openModal(spot, status) {
             throw new Error('Pricing unavailable');
         }
         currentPricingRule = await r.json();
+        modalPricingMode.textContent = `Mode: ${getPricingModeLabel(currentPricingRule)}`;
     } catch {
         currentPricingRule = null;
+        modalPricingMode.textContent = 'Mode unavailable';
     }
 
     bookStart.innerHTML = '';
@@ -300,12 +313,14 @@ async function populateStartSlots(spotId) {
     const startFloor = floorToHour(now);
     const horizonEnd = addMinutes(startFloor, SLOT_HORIZON_HOURS * 60);
     const slots = [];
+    const occupiedUntil = getOccupiedUntil(spotId);
 
     let cursor = new Date(startFloor);
     while (cursor <= horizonEnd) {
         const slotStart = new Date(cursor);
         const minEnd = addMinutes(slotStart, MIN_BOOKING_MINUTES);
-        if (slotStart >= startFloor && isRangeFree(spotId, slotStart, minEnd)) {
+        const blockedByOccupancy = occupiedUntil && slotStart < occupiedUntil;
+        if (slotStart >= startFloor && !blockedByOccupancy && isRangeFree(spotId, slotStart, minEnd)) {
             slots.push(slotStart);
         }
         cursor = addMinutes(cursor, SLOT_STEP_MINUTES);
@@ -321,7 +336,7 @@ async function populateStartSlots(spotId) {
     const options = await Promise.all(
         slots.map(async (slot) => {
             const estimate = estimateSlotPrice(slot);
-            const label = `${formatSlotLabel(slot)} - approx $${estimate.toFixed(2)} (30m)`;
+            const label = `${formatSlotLabel(slot)} • ~$${estimate.toFixed(2)}`;
             return `<option value="${slot.toISOString()}">${label}</option>`;
         })
     );
@@ -384,10 +399,7 @@ async function updatePricingQuote() {
         latestQuote = lockedQuote;
         const holdSeconds = Math.max(0, Math.ceil((quoteLockUntil - now) / 1000));
         modalRate.textContent = `$${lockedQuote.estimated_total.toFixed(2)} total ($${lockedQuote.estimated_hourly_rate.toFixed(2)}/hr)`;
-        pricingExplainer.innerHTML = [
-            ...lockedQuote.reasons,
-            `Price held for ${holdSeconds}s while you confirm this selection`,
-        ].map((reason) => `<div>${reason}</div>`).join('');
+        pricingExplainer.textContent = compactQuoteSummary(lockedQuote, holdSeconds);
         pricingExplainer.style.display = 'block';
         return;
     }
@@ -413,10 +425,7 @@ async function updatePricingQuote() {
         quoteLockKey = selectionKey;
         quoteLockUntil = Date.now() + PRICE_LOCK_MS;
         modalRate.textContent = `$${data.estimated_total.toFixed(2)} total ($${data.estimated_hourly_rate.toFixed(2)}/hr)`;
-        pricingExplainer.innerHTML = [
-            ...data.reasons,
-            `Price held for ${Math.round(PRICE_LOCK_MS / 1000)}s while you complete booking`,
-        ].map((reason) => `<div>${reason}</div>`).join('');
+        pricingExplainer.textContent = compactQuoteSummary(data, Math.round(PRICE_LOCK_MS / 1000));
         pricingExplainer.style.display = 'block';
     } catch (err) {
         latestQuote = null;
@@ -450,19 +459,21 @@ async function refreshUserUpcomingReservations() {
             .sort((a, b) => a.start - b.start);
 
         if (!upcoming.length) {
-            userUpcoming.innerHTML = '<strong>Upcoming reservations:</strong> None';
-            userUpcoming.style.display = 'block';
+            userUpcoming.style.display = 'none';
+            userUpcoming.innerHTML = '';
             return;
         }
 
         const rows = upcoming
-            .map((r) => `<li>Spot ${r.spot_id}: ${formatLocalDate(r.start)} to ${formatLocalDate(r.end)}</li>`)
+            .slice(0, 2)
+            .map((r) => `<li>Spot ${r.spot_id} · ${formatCompactRange(r.start, r.end)}</li>`)
             .join('');
+        const more = upcoming.length > 2 ? `<div class="user-upcoming-more">+${upcoming.length - 2} more</div>` : '';
 
-        userUpcoming.innerHTML = `<strong>Upcoming reservations:</strong><ul>${rows}</ul>`;
+        userUpcoming.innerHTML = `<strong>Your upcoming</strong><ul>${rows}</ul>${more}`;
         userUpcoming.style.display = 'block';
     } catch {
-        userUpcoming.innerHTML = '<strong>Upcoming reservations:</strong> Unable to load';
+        userUpcoming.innerHTML = '<strong>Your upcoming</strong><div>Unavailable</div>';
         userUpcoming.style.display = 'block';
     }
 }
@@ -477,16 +488,14 @@ function renderConfirmation(reservation, start, end) {
     bookForm.style.display = 'none';
     confirmationPanel.style.display = 'block';
     confirmationPanel.innerHTML = `
-        <h3>Reservation Confirmed</h3>
-        <div><strong>Reservation ID:</strong> #${reservation.id}</div>
-        <div><strong>Start:</strong> ${formatLocalDate(start)}</div>
-        <div><strong>End:</strong> ${formatLocalDate(end)}</div>
-        <div><strong>Duration:</strong> ${durationText}</div>
-        <div><strong>Total Price:</strong> ${total !== null ? `$${total.toFixed(2)}` : 'Calculated at completion'}</div>
-        <div class="confirmation-note">Your booking has been saved successfully.</div>
+        <h3>Confirmed</h3>
+        <div><strong>ID:</strong> #${reservation.id}</div>
+        <div><strong>When:</strong> ${formatCompactRange(start, end)}</div>
+        <div><strong>Length:</strong> ${durationText}</div>
+        <div><strong>Total:</strong> ${total !== null ? `$${total.toFixed(2)}` : 'At completion'}</div>
     `;
 
-    showMsg('success', 'Reservation created successfully.');
+    showMsg('success', 'Reservation saved.');
 }
 
 function validateSelection(start, end) {
@@ -534,6 +543,37 @@ function estimateSlotPrice(start) {
     const isPeak = isPeakHourLocal(start);
     const hourly = base * (isPeak ? peakMultiplier : 1) * demandMultiplier;
     return hourly * 0.5;
+}
+
+function getPricingModeLabel(rule) {
+    if (!rule) {
+        return 'Unavailable';
+    }
+    if (rule.is_peak_now && rule.is_rush_now) {
+        return 'Peak + Rush';
+    }
+    if (rule.is_peak_now) {
+        return 'Peak';
+    }
+    if (rule.is_rush_now) {
+        return 'Rush';
+    }
+    return 'Standard';
+}
+
+function compactQuoteSummary(quote, holdSeconds) {
+    const parts = [];
+    if (quote.peak_time_applied) {
+        parts.push('Peak hour');
+    }
+    if (quote.demand_multiplier_peak > 1.01) {
+        parts.push('Demand-adjusted');
+    }
+    if (!parts.length) {
+        parts.push('Standard rate');
+    }
+    parts.push(`Held ${holdSeconds}s`);
+    return parts.join(' • ');
 }
 
 function estimatedDemandRatio(pointInTime) {
@@ -604,6 +644,13 @@ function formatLocalDate(date) {
         hour: 'numeric',
         minute: '2-digit',
     });
+}
+
+function formatCompactRange(start, end) {
+    return `${formatLocalDate(start)} - ${new Date(end).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+    })}`;
 }
 
 function showMsg(type, text) {

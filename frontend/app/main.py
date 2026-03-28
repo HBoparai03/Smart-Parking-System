@@ -46,10 +46,12 @@ async def floor_page(request: Request, floor_num: int):
 # ── API proxy endpoints (called by frontend JS) ──
 
 @app.get("/api/spots")
-async def api_spots(floor: int = None):
+async def api_spots(floor: int = None, active_only: bool = False):
     params = {}
     if floor:
         params["floor"] = floor
+    if active_only:
+        params["active_only"] = active_only
     return await _forward("GET", "/spots/", params=params)
 
 

@@ -7,7 +7,7 @@
     <div class="landing-card">
         <div class="landing-icon">🅿️</div>
         <h1>COE892 Parking System</h1>
-        <p class="landing-subtitle">Smart Parking — Real-time availability across 3 floors</p>
+        <p class="landing-subtitle">Live parking across 3 floors</p>
         <a href="/floor/1" class="btn-book">Book Parking</a>
         <div class="landing-stats" id="stats">
             <div class="stat">
@@ -40,7 +40,7 @@
 async function loadStats() {
     try {
         const [spotsRes, availRes, pendingRes, activeRes] = await Promise.all([
-            fetch('/api/spots'),
+            fetch('/api/spots?active_only=true'),
             fetch('/api/availability'),
             fetch('/api/reservations?status=pending'),
             fetch('/api/reservations?status=active'),

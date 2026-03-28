@@ -11,6 +11,7 @@ class Availability(Base):
     is_occupied = Column(Boolean, nullable=False, default=False)
     # How many vehicles are currently occupying (for multi-capacity spots)
     occupied_count = Column(Integer, nullable=False, default=0)
+    occupied_until = Column(DateTime(timezone=True), nullable=True)
     last_sensor_update = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     spot = relationship("ParkingSpot", back_populates="availability")

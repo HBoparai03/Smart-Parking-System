@@ -11,6 +11,8 @@ import httpx
 DB_URL = os.getenv("DB_SERVICE_URL", "http://localhost:8001")
 DEFAULT_INTERVAL = float(os.getenv("SENSOR_INTERVAL_SEC", "5"))
 DEFAULT_RANDOM_RATE = float(os.getenv("RANDOM_TRAFFIC_RATE", "0.00"))
+RANDOM_STAY_MIN_MINUTES = max(30, int(os.getenv("RANDOM_TRAFFIC_MIN_STAY_MINUTES", "30")))
+RANDOM_STAY_MAX_MINUTES = max(RANDOM_STAY_MIN_MINUTES, int(os.getenv("RANDOM_TRAFFIC_MAX_STAY_MINUTES", "90")))
 RUSH_THRESHOLD = 0.1
 DEMAND_SIGMOID_STEEPNESS = 4.0
 DEMAND_MIDPOINT = 0.45
@@ -22,6 +24,7 @@ RATIO_SMOOTH_ALPHA = 0.4
 MIN_BILLABLE_HOURS = 0.5
 
 _smoothed_demand_ratio = 0.0
+_random_occupied_until: Dict[int, datetime] = {}
 
 
 def utc_now() -> datetime:
@@ -47,6 +50,11 @@ def patch_json(client: httpx.Client, path: str, payload: dict):
     r = client.patch(f"{DB_URL}{path}", json=payload)
     r.raise_for_status()
     return r.json()
+
+
+def _schedule_random_departure(now: datetime) -> datetime:
+    hold_minutes = random.randint(RANDOM_STAY_MIN_MINUTES, RANDOM_STAY_MAX_MINUTES)
+    return now + timedelta(minutes=hold_minutes)
 
 
 def _smooth_demand_multiplier(demand_ratio: float) -> float:
@@ -139,30 +147,68 @@ def sync_availability(client: httpx.Client, active_spots: Set[int], random_rate:
     availability: List[dict] = get_json(client, "/availability/")
     pending_reservations: List[dict] = get_json(client, "/reservations/", params={"status": "pending"})
     reserved_spots = {item["spot_id"] for item in pending_reservations}.union(active_spots)
+    now = utc_now()
+    seen_spots: Set[int] = set()
 
     changed = 0
     for item in availability:
         spot_id = item["spot_id"]
+        seen_spots.add(spot_id)
         current_occupied = bool(item.get("is_occupied", False))
         target_occupied = spot_id in active_spots
+        persisted_hold_until = parse_ts(item["occupied_until"]) if item.get("occupied_until") else None
+        random_hold_until = _random_occupied_until.get(spot_id) or persisted_hold_until
+
+        if spot_id in reserved_spots:
+            _random_occupied_until.pop(spot_id, None)
+            random_hold_until = None
 
         if not target_occupied and random_rate > 0 and spot_id not in reserved_spots:
-            if current_occupied and random.random() < random_rate:
-                target_occupied = False
-            elif not current_occupied and random.random() < random_rate:
+            if random_hold_until and random_hold_until > now:
+                _random_occupied_until[spot_id] = random_hold_until
                 target_occupied = True
+            else:
+                if random_hold_until:
+                    _random_occupied_until.pop(spot_id, None)
+                    target_occupied = False
+                elif current_occupied:
+                    _random_occupied_until[spot_id] = _schedule_random_departure(now)
+                    target_occupied = True
+                elif random.random() < random_rate:
+                    _random_occupied_until[spot_id] = _schedule_random_departure(now)
+                    target_occupied = True
 
         target_count = 1 if target_occupied else 0
         current_count = int(item.get("occupied_count", 0))
-        if current_occupied == target_occupied and current_count == target_count:
+        target_occupied_until = None
+        if target_occupied and spot_id not in active_spots:
+            target_occupied_until = _random_occupied_until.get(spot_id)
+
+        current_occupied_until = persisted_hold_until
+        target_occupied_until_iso = target_occupied_until.isoformat() if target_occupied_until else None
+        current_occupied_until_iso = current_occupied_until.isoformat() if current_occupied_until else None
+
+        if (
+            current_occupied == target_occupied
+            and current_count == target_count
+            and current_occupied_until_iso == target_occupied_until_iso
+        ):
             continue
 
         patch_json(
             client,
             f"/availability/{spot_id}",
-            {"is_occupied": target_occupied, "occupied_count": target_count},
+            {
+                "is_occupied": target_occupied,
+                "occupied_count": target_count,
+                "occupied_until": target_occupied_until_iso,
+            },
         )
         changed += 1
+
+    for spot_id in list(_random_occupied_until):
+        if spot_id not in seen_spots:
+            _random_occupied_until.pop(spot_id, None)
 
     return changed
 
