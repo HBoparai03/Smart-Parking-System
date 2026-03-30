@@ -1,10 +1,11 @@
 import math
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, select
 from app.database import get_db
+from app.models.availability import Availability
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.pricing import PricingRule
 from app.models.parking_spot import ParkingSpot
@@ -54,12 +55,44 @@ def _smooth_demand_multiplier(demand_ratio: float) -> float:
     return 1.0 + (MAX_DEMAND_EXTRA * normalized)
 
 
-def _overlap_ratio(midpoint: datetime, reservations: List[Reservation], total_spots: int) -> float:
-    occupied = {
+def _availability_occupied_spots_at(
+    midpoint: datetime,
+    availability_items: List[Availability],
+    active_spot_ids: set[int],
+    reserved_overlap_spots: set[int],
+) -> set[int]:
+    occupied: set[int] = set()
+
+    for item in availability_items:
+        if item.spot_id not in active_spot_ids or item.spot_id in reserved_overlap_spots:
+            continue
+        if not item.is_occupied:
+            continue
+
+        occupied_until = item.occupied_until.astimezone(timezone.utc) if item.occupied_until else None
+        if occupied_until and midpoint >= occupied_until:
+            continue
+
+        occupied.add(item.spot_id)
+
+    return occupied
+
+
+def _overlap_ratio(
+    midpoint: datetime,
+    reservations: List[Reservation],
+    availability_items: List[Availability],
+    active_spot_ids: set[int],
+    total_spots: int,
+) -> float:
+    reserved_overlap_spots = {
         reservation.spot_id
         for reservation in reservations
         if reservation.start_time <= midpoint < reservation.end_time
     }
+    occupied = reserved_overlap_spots.union(
+        _availability_occupied_spots_at(midpoint, availability_items, active_spot_ids, reserved_overlap_spots)
+    )
     return min(len(occupied) / max(total_spots, 1), 1.0)
 
 
@@ -78,17 +111,7 @@ def _is_peak_hour(ts: datetime) -> bool:
     return 13 <= local_hour < 20
 
 
-@router.get("/", response_model=List[PricingRuleResponse])
-async def list_pricing_rules(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(PricingRule))
-    return result.scalars().all()
-
-
-@router.post("/quote", response_model=PricingQuoteResponse)
-async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Depends(get_db)):
-    start_utc = _to_utc(payload.start_time)
-    end_utc = _to_utc(payload.end_time)
-
+def _validate_quote_window(start_utc: datetime, end_utc: datetime) -> timedelta:
     if end_utc <= start_utc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="end_time must be after start_time")
 
@@ -108,12 +131,23 @@ async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Dep
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="start_time cannot be before the current hour",
         )
+    return duration
 
-    spot = await db.get(ParkingSpot, payload.spot_id)
+
+async def build_pricing_quote(
+    db: AsyncSession,
+    spot_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+    exclude_reservation_id: Optional[int] = None,
+) -> PricingQuoteResponse:
+    duration = _validate_quote_window(start_utc, end_utc)
+
+    spot = await db.get(ParkingSpot, spot_id)
     if not spot or not spot.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active parking spot not found")
 
-    rule_result = await db.execute(select(PricingRule).where(PricingRule.spot_id == payload.spot_id))
+    rule_result = await db.execute(select(PricingRule).where(PricingRule.spot_id == spot_id))
     rule = rule_result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pricing rule not found")
@@ -124,17 +158,19 @@ async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Dep
     if total_active_spots == 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No active spots available")
 
-    reservation_result = await db.execute(
-        select(Reservation).where(
-            and_(
-                Reservation.status.in_([ReservationStatus.pending, ReservationStatus.active]),
-                Reservation.spot_id.in_(active_spot_ids),
-                Reservation.start_time < (end_utc + timedelta(hours=PROJECTION_LOOKAHEAD_HOURS)),
-                Reservation.end_time > start_utc,
-            )
-        )
-    )
+    reservation_filters = [
+        Reservation.status.in_([ReservationStatus.pending, ReservationStatus.active]),
+        Reservation.spot_id.in_(active_spot_ids),
+        Reservation.start_time < (end_utc + timedelta(hours=PROJECTION_LOOKAHEAD_HOURS)),
+        Reservation.end_time > start_utc,
+    ]
+    if exclude_reservation_id is not None:
+        reservation_filters.append(Reservation.id != exclude_reservation_id)
+
+    reservation_result = await db.execute(select(Reservation).where(and_(*reservation_filters)))
     projected_reservations = reservation_result.scalars().all()
+    availability_result = await db.execute(select(Availability).where(Availability.spot_id.in_(active_spot_ids)))
+    availability_items = availability_result.scalars().all()
 
     total_price = 0.0
     rate_samples: List[float] = []
@@ -148,7 +184,13 @@ async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Dep
         segment_hours = (next_tick - cursor).total_seconds() / 3600.0
         midpoint = cursor + (next_tick - cursor) / 2
 
-        overlap_ratio = _overlap_ratio(midpoint, projected_reservations, total_active_spots)
+        overlap_ratio = _overlap_ratio(
+            midpoint,
+            projected_reservations,
+            availability_items,
+            active_spot_ids,
+            total_active_spots,
+        )
         starts_soon_ratio = _starts_soon_ratio(midpoint, projected_reservations, total_active_spots)
         projected_ratio = min(1.0, (0.85 * overlap_ratio) + (0.15 * starts_soon_ratio))
 
@@ -186,7 +228,7 @@ async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Dep
         reasons.append("Standard demand pricing")
 
     return PricingQuoteResponse(
-        spot_id=payload.spot_id,
+        spot_id=spot_id,
         start_time=start_utc,
         end_time=end_utc,
         duration_hours=round(duration_hours, 2),
@@ -197,6 +239,19 @@ async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Dep
         demand_multiplier_peak=round(max_demand_multiplier, 3),
         reasons=reasons,
     )
+
+
+@router.get("/", response_model=List[PricingRuleResponse])
+async def list_pricing_rules(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PricingRule))
+    return result.scalars().all()
+
+
+@router.post("/quote", response_model=PricingQuoteResponse)
+async def get_pricing_quote(payload: PricingQuoteRequest, db: AsyncSession = Depends(get_db)):
+    start_utc = _to_utc(payload.start_time)
+    end_utc = _to_utc(payload.end_time)
+    return await build_pricing_quote(db, payload.spot_id, start_utc, end_utc)
 
 
 @router.get("/{spot_id}", response_model=PricingRuleResponse)

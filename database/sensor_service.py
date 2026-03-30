@@ -68,10 +68,36 @@ def _smooth_demand_multiplier(demand_ratio: float) -> float:
     return 1.0 + (MAX_DEMAND_EXTRA * normalized)
 
 
-def _reservation_based_projection_ratio(
+def _availability_occupied_spots_at(
+    checkpoint: datetime,
+    availability: List[dict],
+    active_spot_ids: Set[int],
+    reserved_overlap_spots: Set[int],
+) -> Set[int]:
+    occupied: Set[int] = set()
+
+    for item in availability:
+        spot_id = item.get("spot_id")
+        if spot_id not in active_spot_ids or spot_id in reserved_overlap_spots:
+            continue
+        if not bool(item.get("is_occupied", False)):
+            continue
+
+        occupied_until_value = item.get("occupied_until")
+        if occupied_until_value and checkpoint >= parse_ts(occupied_until_value):
+            continue
+
+        occupied.add(spot_id)
+
+    return occupied
+
+
+def _projected_demand_ratio(
     now: datetime,
     total_spots: int,
     reservations: List[dict],
+    availability: List[dict],
+    active_spot_ids: Set[int],
 ) -> float:
     if total_spots <= 0:
         return 0.0
@@ -84,11 +110,14 @@ def _reservation_based_projection_ratio(
     ]
 
     for checkpoint in checkpoints:
-        overlap = {
+        reservation_overlap = {
             item["spot_id"]
             for item in reservations
             if parse_ts(item["start_time"]) <= checkpoint < parse_ts(item["end_time"])
         }
+        occupied = reservation_overlap.union(
+            _availability_occupied_spots_at(checkpoint, availability, active_spot_ids, reservation_overlap)
+        )
 
         starts_soon = {
             item["spot_id"]
@@ -96,7 +125,7 @@ def _reservation_based_projection_ratio(
             if checkpoint <= parse_ts(item["start_time"]) < (checkpoint + timedelta(hours=PROJECTION_LOOKAHEAD_HOURS))
         }
 
-        overlap_ratio = len(overlap) / total_spots
+        overlap_ratio = len(occupied) / total_spots
         starts_soon_ratio = len(starts_soon) / total_spots
         ratios.append(min(1.0, (0.85 * overlap_ratio) + (0.15 * starts_soon_ratio)))
 
@@ -123,9 +152,13 @@ def sync_reservations(client: httpx.Client) -> Tuple[Set[int], int]:
         spot_id = item["spot_id"]
 
         if now >= end_time:
-            hours = max((end_time - start_time).total_seconds() / 3600.0, MIN_BILLABLE_HOURS)
-            rate = pricing_by_spot.get(spot_id, 0.0)
-            price_paid = round(rate * hours, 2)
+            locked_price = item.get("price_paid")
+            if locked_price is not None:
+                price_paid = round(float(locked_price), 2)
+            else:
+                hours = max((end_time - start_time).total_seconds() / 3600.0, MIN_BILLABLE_HOURS)
+                rate = pricing_by_spot.get(spot_id, 0.0)
+                price_paid = round(rate * hours, 2)
             patch_json(
                 client,
                 f"/reservations/{reservation_id}",
@@ -212,8 +245,9 @@ def sync_availability(client: httpx.Client, active_spots: Set[int], random_rate:
 
     return changed
 
-def surge_pricing(client: httpx.Client, active_spots: Set[int]) -> int:  # price surging
+def surge_pricing(client: httpx.Client) -> int:  # price surging
     spots: List[dict] = get_json(client, "/spots/", params={"active_only": True})
+    availability: List[dict] = get_json(client, "/availability/")
     pending_reservations: List[dict] = get_json(client, "/reservations/", params={"status": "pending"})
     active_reservations: List[dict] = get_json(client, "/reservations/", params={"status": "active"})
     pricing_rules: List[dict] = get_json(client, "/pricing/")
@@ -231,7 +265,13 @@ def surge_pricing(client: httpx.Client, active_spots: Set[int]) -> int:  # price
         item for item in (pending_reservations + active_reservations) if item.get("spot_id") in active_spot_ids
     ]
 
-    projected_ratio = _reservation_based_projection_ratio(utc_now(), total_spots, projected_reservations)
+    projected_ratio = _projected_demand_ratio(
+        utc_now(),
+        total_spots,
+        projected_reservations,
+        availability,
+        active_spot_ids,
+    )
     _smoothed_demand_ratio = (RATIO_SMOOTH_ALPHA * projected_ratio) + ((1.0 - RATIO_SMOOTH_ALPHA) * _smoothed_demand_ratio)
 
     rush_multiplier = round(_smooth_demand_multiplier(_smoothed_demand_ratio), 3)
@@ -300,7 +340,7 @@ def run_cycle(client: httpx.Client, random_rate: float) -> None:
     availability_changes = sync_availability(client, active_spots, random_rate)
 
     timed_changes = sync_timed_pricing(client)
-    rush_changes = surge_pricing(client, active_spots)
+    rush_changes = surge_pricing(client)
 
     print(
         f"[{utc_now().isoformat()}] reservations={reservation_changes} "

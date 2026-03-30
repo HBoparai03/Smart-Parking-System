@@ -37,7 +37,14 @@
 
 {% block scripts %}
 <script>
+let statsRequestInFlight = false;
+
 async function loadStats() {
+    if (statsRequestInFlight) {
+        return;
+    }
+
+    statsRequestInFlight = true;
     try {
         const [spotsRes, availRes, pendingRes, activeRes] = await Promise.all([
             fetch('/api/spots?active_only=true'),
@@ -85,8 +92,17 @@ async function loadStats() {
         document.getElementById('stat-occupied').textContent = occupied;
     } catch (e) {
         console.error('Failed to load stats', e);
+    } finally {
+        statsRequestInFlight = false;
     }
 }
+
 loadStats();
+setInterval(loadStats, 5000);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        loadStats();
+    }
+});
 </script>
 {% endblock %}

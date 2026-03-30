@@ -86,6 +86,11 @@ def main() -> None:
         action="store_true",
         help="Skip running seed.py after the backend starts",
     )
+    parser.add_argument(
+        "--preserve-data",
+        action="store_true",
+        help="Keep the existing PostgreSQL data volume instead of resetting local data on launch",
+    )
     args = parser.parse_args()
 
     if os.name != "nt":
@@ -95,6 +100,12 @@ def main() -> None:
     db_service_url = DEFAULT_DB_SERVICE_URL
     local_env = os.environ.copy()
     local_env["DB_SERVICE_URL"] = DEFAULT_DB_SERVICE_URL
+
+    if args.preserve_data:
+        print("Preserving existing PostgreSQL data...")
+    else:
+        print("Resetting PostgreSQL data volume...")
+        run_checked(["docker", "compose", "down", "-v", "--remove-orphans"], DATABASE_DIR)
 
     print("Starting PostgreSQL...")
     run_checked(["docker", "compose", "up", "-d"], DATABASE_DIR)
@@ -142,6 +153,8 @@ def main() -> None:
     print("Backend docs: http://localhost:8001/docs")
     print()
     print("Close the opened service windows to stop the backend, frontend, and sensor loop.")
+    if not args.preserve_data:
+        print("This launch reset the local PostgreSQL data volume before starting the stack.")
 
 
 if __name__ == "__main__":

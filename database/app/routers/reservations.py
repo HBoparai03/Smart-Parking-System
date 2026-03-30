@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models.availability import Availability
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.parking_spot import ParkingSpot
+from app.routers.pricing import build_pricing_quote
 from app.schemas.reservation import (
     MAX_BOOKING_HOURS,
     MIN_BOOKING_MINUTES,
@@ -141,7 +142,8 @@ async def create_reservation(payload: ReservationCreate, db: AsyncSession = Depe
             detail="Spot is already reserved for the requested time window",
         )
 
-    reservation = Reservation(**payload.model_dump())
+    quote = await build_pricing_quote(db, payload.spot_id, _to_utc(payload.start_time), _to_utc(payload.end_time))
+    reservation = Reservation(**payload.model_dump(), price_paid=quote.estimated_total)
     db.add(reservation)
     await db.flush()
     await db.refresh(reservation)
@@ -184,6 +186,15 @@ async def update_reservation(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Spot is already reserved for the requested time window",
             )
+
+        quote = await build_pricing_quote(
+            db,
+            reservation.spot_id,
+            _to_utc(new_start),
+            _to_utc(new_end),
+            exclude_reservation_id=reservation.id,
+        )
+        updates["price_paid"] = quote.estimated_total
 
     for field, value in updates.items():
         setattr(reservation, field, value)

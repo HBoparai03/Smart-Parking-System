@@ -483,7 +483,7 @@ function renderConfirmation(reservation, start, end) {
     const durationText = durationMinutes >= 60
         ? `${(durationMinutes / 60).toFixed(durationMinutes % 60 === 0 ? 0 : 1)} hour(s)`
         : `${durationMinutes} minutes`;
-    const total = latestQuote ? latestQuote.estimated_total : null;
+    const total = reservation.price_paid ?? (latestQuote ? latestQuote.estimated_total : null);
 
     bookForm.style.display = 'none';
     confirmationPanel.style.display = 'block';
@@ -588,6 +588,21 @@ function estimatedDemandRatio(pointInTime) {
         if (pointInTime <= r.start && r.start < soonEnd) {
             startsSoon.add(r.spot_id);
         }
+    });
+
+    Object.values(availMap).forEach((avail) => {
+        if (!avail.is_occupied || !allActiveSpotIds.has(avail.spot_id) || occupied.has(avail.spot_id)) {
+            return;
+        }
+
+        if (avail.occupied_until) {
+            const occupiedUntil = new Date(avail.occupied_until);
+            if (!Number.isNaN(occupiedUntil.getTime()) && pointInTime >= occupiedUntil) {
+                return;
+            }
+        }
+
+        occupied.add(avail.spot_id);
     });
 
     const total = allActiveSpotIds.size || 1;

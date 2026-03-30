@@ -20,7 +20,7 @@ class Reservation(Base):
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=False)
     status = Column(Enum(ReservationStatus), nullable=False, default=ReservationStatus.pending)
-    price_paid = Column(Float, nullable=True)  # Populated when reservation is completed
+    price_paid = Column(Float, nullable=True)  # Locked quote stored at booking time and finalized on completion
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
